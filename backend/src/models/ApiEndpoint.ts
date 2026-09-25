@@ -13,6 +13,7 @@ export interface IApiEndpoint extends Document {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
   url: string;
   headers: IHeader[];
+  params?: IHeader[];
   body?: string;
   description?: string;
   createdAt: Date;
@@ -49,6 +50,13 @@ const ApiEndpointSchema: Schema = new Schema(
       trim: true,
     },
     headers: [
+      {
+        key: { type: String, trim: true },
+        value: { type: String, trim: true },
+        enabled: { type: Boolean, default: true },
+      },
+    ],
+    params: [
       {
         key: { type: String, trim: true },
         value: { type: String, trim: true },

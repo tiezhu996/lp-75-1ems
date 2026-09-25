@@ -13,6 +13,8 @@ import {
   Typography,
   Empty,
   Popconfirm,
+  Alert,
+  Badge,
 } from 'antd';
 import {
   SendOutlined,
@@ -30,6 +32,7 @@ import {
   ApiEndpoint,
   HttpMethod,
   Header,
+  Param,
   Environment,
   ProxyResponse,
 } from '../types';
@@ -42,6 +45,12 @@ import {
 import { sendRequest } from '../api/proxy';
 import { replaceEnvVariables } from '../utils/environment';
 import { tryFormatJson, isValidJson } from '../utils/json';
+import {
+  parseUrl,
+  buildUrl,
+  mergeParams,
+  findDuplicateKeys,
+} from '../utils/queryParams';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -67,6 +76,7 @@ interface RequestPanelProps {
     method: HttpMethod;
     url: string;
     headers: Header[];
+    params?: Param[];
     body?: string;
   } | null;
 }
@@ -81,12 +91,48 @@ const RequestPanel = ({
   const [method, setMethod] = useState<HttpMethod>('GET');
   const [url, setUrl] = useState('');
   const [headers, setHeaders] = useState<Header[]>([]);
+  const [params, setParams] = useState<Param[]>([]);
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [response, setResponse] = useState<ProxyResponse | null>(null);
   const [endpointName, setEndpointName] = useState('');
   const [showNameInput, setShowNameInput] = useState(false);
+
+  // 表格是查询参数的唯一权威来源：表格变化时用当前地址的 base 部分重建地址
+  const applyParamsChange = (newParams: Param[], currentUrl: string) => {
+    setParams(newParams);
+    const { base, fragment } = parseUrl(currentUrl);
+    setUrl(buildUrl(base, newParams, fragment));
+  };
+
+  // 地址栏输入：查询内容自动落到参数表；地址文本保持用户输入原样，
+  // 发送时仍以参数表为准重建，避免同名参数重复发送
+  const handleUrlChange = (text: string) => {
+    const parsed = parseUrl(text);
+    if (parsed.params.length > 0) {
+      setParams((prev) => mergeParams(prev, parsed.params));
+    }
+    setUrl(text);
+  };
+
+  // 加载一份完整请求配置（选择接口、恢复历史记录）：
+  // 优先使用保存的参数表，否则从地址中解析
+  const loadRequestConfig = (config: {
+    method: HttpMethod;
+    url: string;
+    headers: Header[];
+    params?: Param[];
+    body?: string;
+  }) => {
+    setMethod(config.method);
+    const parsed = parseUrl(config.url);
+    const table = config.params ?? parsed.params;
+    setParams(table);
+    setUrl(buildUrl(parsed.base, table, parsed.fragment));
+    setHeaders(config.headers);
+    setBody(config.body || '');
+  };
 
   useEffect(() => {
     if (collectionId) {
@@ -99,10 +145,7 @@ const RequestPanel = ({
 
   useEffect(() => {
     if (initialConfig) {
-      setMethod(initialConfig.method);
-      setUrl(initialConfig.url);
-      setHeaders(initialConfig.headers);
-      setBody(initialConfig.body || '');
+      loadRequestConfig(initialConfig);
       setSelectedEndpoint(null);
     }
   }, [initialConfig]);
@@ -117,10 +160,13 @@ const RequestPanel = ({
 
   const handleSelectEndpoint = useCallback((endpoint: ApiEndpoint) => {
     setSelectedEndpoint(endpoint);
-    setMethod(endpoint.method);
-    setUrl(endpoint.url);
-    setHeaders(endpoint.headers || []);
-    setBody(endpoint.body || '');
+    loadRequestConfig({
+      method: endpoint.method,
+      url: endpoint.url,
+      headers: endpoint.headers || [],
+      params: endpoint.params,
+      body: endpoint.body,
+    });
     setResponse(null);
   }, []);
 
@@ -142,6 +188,24 @@ const RequestPanel = ({
     }
   };
 
+  const handleAddParam = () => {
+    applyParamsChange([...params, { key: '', value: '', enabled: true }], url);
+  };
+
+  const handleRemoveParam = (index: number) => {
+    const newParams = [...params];
+    newParams.splice(index, 1);
+    applyParamsChange(newParams, url);
+  };
+
+  const handleUpdateParam = (index: number, field: 'key' | 'value' | 'enabled', value: string | boolean) => {
+    const newParams = [...params];
+    if (newParams[index]) {
+      newParams[index][field] = value as never;
+      applyParamsChange(newParams, url);
+    }
+  };
+
   const handleFormatBody = () => {
     setBody(tryFormatJson(body));
   };
@@ -150,6 +214,7 @@ const RequestPanel = ({
     setMethod('GET');
     setUrl('');
     setHeaders([]);
+    setParams([]);
     setBody('');
     setResponse(null);
     setSelectedEndpoint(null);
@@ -158,19 +223,25 @@ const RequestPanel = ({
   };
 
   const handleSend = async () => {
-    if (!url.trim()) {
+    // 发送时以参数表为准重建地址：地址里手写的查询内容已被参数表接管，
+    // 同名参数只取第一次出现的值，不会重复发送
+    const { base, fragment } = parseUrl(url);
+    const finalUrl = buildUrl(base, params, fragment);
+
+    if (!base.trim()) {
       message.error('请输入请求 URL');
       return;
     }
 
     try {
       setSending(true);
-      const resolvedUrl = replaceEnvVariables(url, activeEnvironment);
+      const resolvedUrl = replaceEnvVariables(finalUrl, activeEnvironment);
 
       const result = await sendRequest({
         method,
         url: resolvedUrl,
         headers,
+        params,
         body,
       });
 
@@ -201,6 +272,7 @@ const RequestPanel = ({
           method,
           url,
           headers,
+          params,
           body,
         });
         message.success('更新成功');
@@ -211,6 +283,7 @@ const RequestPanel = ({
           method,
           url,
           headers,
+          params,
           body,
         });
         message.success('保存成功');
@@ -296,6 +369,83 @@ const RequestPanel = ({
     },
   ];
 
+  const duplicateKeys = findDuplicateKeys(params);
+  // 同名参数第一次出现的行号，用于高亮后续重复行
+  const firstOccurrence = new Map<string, number>();
+  params.forEach((param, index) => {
+    const key = param.key.trim();
+    if (key && !firstOccurrence.has(key)) {
+      firstOccurrence.set(key, index);
+    }
+  });
+
+  interface ParamRow {
+    index: number;
+    enabled: boolean;
+    name: string;
+    value: string;
+  }
+
+  const paramColumns = [
+    {
+      title: '启用',
+      dataIndex: 'enabled',
+      key: 'enabled',
+      width: 60,
+      render: (enabled: boolean, record: ParamRow) => (
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => handleUpdateParam(record.index, 'enabled', e.target.checked)}
+          style={{ cursor: 'pointer' }}
+        />
+      ),
+    },
+    {
+      title: '参数名',
+      dataIndex: 'name',
+      key: 'name',
+      width: '35%',
+      render: (name: string, record: ParamRow) => (
+        <Input
+          placeholder="参数名"
+          value={name}
+          status={duplicateKeys.includes(name.trim()) ? 'warning' : ''}
+          onChange={(e) => handleUpdateParam(record.index, 'key', e.target.value)}
+          size="small"
+        />
+      ),
+    },
+    {
+      title: '参数值',
+      dataIndex: 'value',
+      key: 'value',
+      width: '50%',
+      render: (value: string, record: ParamRow) => (
+        <Input
+          placeholder="参数值"
+          value={value}
+          onChange={(e) => handleUpdateParam(record.index, 'value', e.target.value)}
+          size="small"
+        />
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 40,
+      render: (_: unknown, record: ParamRow) => (
+        <Button
+          type="text"
+          danger
+          size="small"
+          icon={<DeleteOutlined />}
+          onClick={() => handleRemoveParam(record.index)}
+        />
+      ),
+    },
+  ];
+
   const responseTabItems = [
     {
       key: 'body',
@@ -343,10 +493,61 @@ const RequestPanel = ({
   const requestTabItems = [
     {
       key: 'params',
-      label: 'Params',
+      label: (
+        <Space size={4}>
+          Params
+          {duplicateKeys.length > 0 && (
+            <Badge count={duplicateKeys.length} size="small" title="存在重复参数名" />
+          )}
+        </Space>
+      ),
       children: (
         <div style={{ padding: 16 }}>
-          <Text type="secondary">Params 功能将在后续版本支持</Text>
+          <div style={{ marginBottom: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              地址栏中的查询参数会自动同步到下表；发送时以表中勾选的参数为准，未勾选的不发送。
+            </Text>
+          </div>
+          {duplicateKeys.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message={`参数名 ${duplicateKeys
+                .map((key) => `"${key}"`)
+                .join('、')} 重复，发送时将使用第一次出现的值`}
+            />
+          )}
+          <Table
+            columns={paramColumns}
+            dataSource={params.map((p, i) => ({
+              index: i,
+              enabled: p.enabled,
+              name: p.key,
+              value: p.value,
+            }))}
+            rowKey="index"
+            pagination={false}
+            size="small"
+            locale={{ emptyText: '暂无参数，点击下方按钮添加' }}
+            onRow={(record: ParamRow) => ({
+              style:
+                record.name.trim() &&
+                duplicateKeys.includes(record.name.trim()) &&
+                firstOccurrence.get(record.name.trim()) !== record.index
+                  ? { background: '#fffbe6' }
+                  : {},
+            })}
+          />
+          <Button
+            type="dashed"
+            onClick={handleAddParam}
+            block
+            icon={<PlusOutlined />}
+            style={{ marginTop: 8 }}
+          >
+            添加参数
+          </Button>
         </div>
       ),
     },
@@ -477,7 +678,7 @@ const RequestPanel = ({
               </Select>
               <Input
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => handleUrlChange(e.target.value)}
                 placeholder="请输入请求 URL，例如 {{base_url}}/api/users"
                 style={{ flex: 1 }}
                 onPressEnter={handleSend}
@@ -540,7 +741,7 @@ const RequestPanel = ({
 
           <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <div style={{ borderBottom: '1px solid #f0f0f0' }}>
-              <Tabs defaultActiveKey="headers" items={requestTabItems} />
+              <Tabs defaultActiveKey="params" items={requestTabItems} />
             </div>
 
             {response && (

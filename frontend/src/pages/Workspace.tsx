@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Layout, Typography, Avatar, Dropdown, Space, Tag } from 'antd';
 import { LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { Collection, Environment, Header as HeaderType, HttpMethod } from '../types';
+import { Collection, Environment, Header as HeaderType, Param, HttpMethod } from '../types';
 import { getCollections } from '../api/collections';
 import { getEnvironments } from '../api/environments';
 import { getUser } from '../utils/auth';
@@ -19,6 +19,7 @@ interface InitialConfig {
   method: HttpMethod;
   url: string;
   headers: HeaderType[];
+  params?: Param[];
   body?: string;
 }
 

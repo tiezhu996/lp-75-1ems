@@ -15,6 +15,7 @@ interface CreateEndpointRequest {
   method: HttpMethod;
   url: string;
   headers?: IHeader[];
+  params?: IHeader[];
   body?: string;
   description?: string;
 }
@@ -102,7 +103,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const { collectionId, name, method, url, headers, body, description } =
+    const { collectionId, name, method, url, headers, params, body, description } =
       req.body as CreateEndpointRequest;
 
     if (!collectionId || !name || !method || !url) {
@@ -149,6 +150,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       method,
       url: url.trim(),
       headers: headers || [],
+      params: params || [],
       body,
       description: description?.trim(),
     });
@@ -175,7 +177,7 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
     }
 
     const { id } = req.params;
-    const { name, method, url, headers, body, description } = req.body as Partial<CreateEndpointRequest>;
+    const { name, method, url, headers, params, body, description } = req.body as Partial<CreateEndpointRequest>;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       res.status(400).json({
@@ -212,6 +214,10 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
 
     if (headers !== undefined) {
       endpoint.headers = headers;
+    }
+
+    if (params !== undefined) {
+      endpoint.params = params;
     }
 
     if (body !== undefined) {

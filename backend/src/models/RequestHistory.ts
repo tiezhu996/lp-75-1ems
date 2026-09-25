@@ -19,6 +19,7 @@ export interface IRequestHistory extends Document {
   method: string;
   url: string;
   headers: IHistoryHeader[];
+  params?: IHistoryHeader[];
   body?: string;
   response?: IResponseData;
   createdAt: Date;
@@ -41,6 +42,13 @@ const RequestHistorySchema: Schema = new Schema(
       required: true,
     },
     headers: [
+      {
+        key: { type: String, trim: true },
+        value: { type: String, trim: true },
+        enabled: { type: Boolean, default: true },
+      },
+    ],
+    params: [
       {
         key: { type: String, trim: true },
         value: { type: String, trim: true },

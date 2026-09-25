@@ -29,6 +29,7 @@ export interface ProxyRequestData {
   method: HttpMethod;
   url: string;
   headers: HeaderItem[];
+  params?: HeaderItem[];
   body?: string;
 }
 
