@@ -1,5 +1,5 @@
 import http from './http';
-import { ApiResponse, ApiEndpoint, Header, HttpMethod } from '../types';
+import { ApiResponse, ApiEndpoint, Header, QueryParam, HttpMethod } from '../types';
 
 interface CreateEndpointParams {
   collectionId: string;
@@ -7,6 +7,7 @@ interface CreateEndpointParams {
   method: HttpMethod;
   url: string;
   headers?: Header[];
+  params?: QueryParam[];
   body?: string;
   description?: string;
 }
@@ -16,6 +17,7 @@ interface UpdateEndpointParams {
   method?: HttpMethod;
   url?: string;
   headers?: Header[];
+  params?: QueryParam[];
   body?: string;
   description?: string;
 }

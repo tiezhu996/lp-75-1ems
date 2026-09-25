@@ -22,6 +22,12 @@ export interface Header {
   enabled: boolean;
 }
 
+export interface QueryParam {
+  key: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface EnvVariable {
   key: string;
   value: string;
@@ -56,6 +62,7 @@ export interface ApiEndpoint {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  params: QueryParam[];
   body?: string;
   description?: string;
   createdAt: string;
@@ -77,6 +84,7 @@ export interface RequestHistory {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  params: QueryParam[];
   body?: string;
   response?: {
     status: number;
@@ -92,5 +100,6 @@ export interface RequestConfig {
   method: HttpMethod;
   url: string;
   headers: Header[];
+  params: QueryParam[];
   body?: string;
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Modal, Input, List, Tag, Button, message, Space, Typography, Empty, Popconfirm } from 'antd';
 import { SearchOutlined, DeleteOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { RequestHistory as RequestHistoryType, Header } from '../types';
+import { RequestHistory as RequestHistoryType, Header, QueryParam } from '../types';
 import { getHistory, deleteHistory, clearHistory } from '../api/history';
 
 const { Text } = Typography;
@@ -14,6 +14,7 @@ interface HistoryModalProps {
     method: RequestHistoryType['method'];
     url: string;
     headers: Header[];
+    params?: QueryParam[];
     body?: string;
   }) => void;
 }
@@ -55,6 +56,7 @@ const HistoryModal = ({ visible, onClose, onRestore }: HistoryModalProps) => {
       method: item.method,
       url: item.url,
       headers: item.headers,
+      params: item.params,
       body: item.body,
     });
     onClose();

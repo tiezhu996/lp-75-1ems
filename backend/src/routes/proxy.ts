@@ -14,7 +14,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const { method, url, headers, body } = req.body as ProxyRequestData;
+    const { method, url, headers, params, body } = req.body as ProxyRequestData;
 
     if (!method || !url) {
       res.status(400).json({
@@ -24,13 +24,17 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const response = await proxyRequest({ method, url, headers, body });
+    const safeHeaders = headers || [];
+    const safeParams = params || [];
+
+    const response = await proxyRequest({ method, url, headers: safeHeaders, body });
 
     const history = new RequestHistory({
       userId: req.user._id,
       method,
       url,
-      headers,
+      headers: safeHeaders,
+      params: safeParams,
       body,
       response,
     });

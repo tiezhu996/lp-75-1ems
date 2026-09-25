@@ -6,6 +6,12 @@ export interface IHeader {
   enabled: boolean;
 }
 
+export interface IQueryParam {
+  key: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface IApiEndpoint extends Document {
   userId: mongoose.Types.ObjectId;
   collectionId: mongoose.Types.ObjectId;
@@ -13,6 +19,7 @@ export interface IApiEndpoint extends Document {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS';
   url: string;
   headers: IHeader[];
+  params: IQueryParam[];
   body?: string;
   description?: string;
   createdAt: Date;
@@ -49,6 +56,13 @@ const ApiEndpointSchema: Schema = new Schema(
       trim: true,
     },
     headers: [
+      {
+        key: { type: String, trim: true },
+        value: { type: String, trim: true },
+        enabled: { type: Boolean, default: true },
+      },
+    ],
+    params: [
       {
         key: { type: String, trim: true },
         value: { type: String, trim: true },

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layout,
   Card,
@@ -13,6 +13,8 @@ import {
   Typography,
   Empty,
   Popconfirm,
+  Alert,
+  Badge,
 } from 'antd';
 import {
   SendOutlined,
@@ -23,6 +25,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ReloadOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import {
@@ -30,6 +33,7 @@ import {
   ApiEndpoint,
   HttpMethod,
   Header,
+  QueryParam,
   Environment,
   ProxyResponse,
 } from '../types';
@@ -42,6 +46,12 @@ import {
 import { sendRequest } from '../api/proxy';
 import { replaceEnvVariables } from '../utils/environment';
 import { tryFormatJson, isValidJson } from '../utils/json';
+import {
+  parseQueryFromUrl,
+  mergeParams,
+  buildUrlWithParams,
+  getDuplicateParamKeys,
+} from '../utils/queryParams';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -67,6 +77,7 @@ interface RequestPanelProps {
     method: HttpMethod;
     url: string;
     headers: Header[];
+    params?: QueryParam[];
     body?: string;
   } | null;
 }
@@ -81,12 +92,14 @@ const RequestPanel = ({
   const [method, setMethod] = useState<HttpMethod>('GET');
   const [url, setUrl] = useState('');
   const [headers, setHeaders] = useState<Header[]>([]);
+  const [params, setParams] = useState<QueryParam[]>([]);
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [response, setResponse] = useState<ProxyResponse | null>(null);
   const [endpointName, setEndpointName] = useState('');
   const [showNameInput, setShowNameInput] = useState(false);
+  const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (collectionId) {
@@ -97,15 +110,69 @@ const RequestPanel = ({
     setSelectedEndpoint(null);
   }, [collectionId]);
 
+  const loadRequestConfig = useCallback(
+    (config: {
+      method: HttpMethod;
+      url: string;
+      headers: Header[];
+      params?: QueryParam[];
+      body?: string;
+    }) => {
+      setMethod(config.method);
+      setHeaders(config.headers || []);
+      setBody(config.body || '');
+      setResponse(null);
+
+      // 优先使用参数表；没有保存过参数时，把地址里已有的查询内容落到表上
+      if (config.params && config.params.length > 0) {
+        setParams(config.params);
+        setUrl(config.url);
+      } else {
+        const parsed = parseQueryFromUrl(config.url);
+        setUrl(parsed.baseUrl);
+        setParams(parsed.params);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     if (initialConfig) {
-      setMethod(initialConfig.method);
-      setUrl(initialConfig.url);
-      setHeaders(initialConfig.headers);
-      setBody(initialConfig.body || '');
+      loadRequestConfig(initialConfig);
       setSelectedEndpoint(null);
     }
-  }, [initialConfig]);
+  }, [initialConfig, loadRequestConfig]);
+
+  // 地址栏输入时，停顿后自动把查询内容收到参数表；之后以参数表为准
+  useEffect(() => {
+    if (urlSyncTimer.current) {
+      clearTimeout(urlSyncTimer.current);
+    }
+    urlSyncTimer.current = setTimeout(() => {
+      const parsed = parseQueryFromUrl(url);
+      if (parsed.hasQuery) {
+        setUrl(parsed.baseUrl);
+        setParams((prev) => mergeParams(prev, parsed.params));
+      }
+    }, 500);
+    return () => {
+      if (urlSyncTimer.current) {
+        clearTimeout(urlSyncTimer.current);
+      }
+    };
+  }, [url]);
+
+  // 把地址栏里尚未同步的查询内容收进参数表，并返回当前生效的基础地址与参数表
+  const collectParams = useCallback((): { baseUrl: string; effectiveParams: QueryParam[] } => {
+    const parsed = parseQueryFromUrl(url);
+    if (parsed.hasQuery) {
+      const merged = mergeParams(params, parsed.params);
+      setUrl(parsed.baseUrl);
+      setParams(merged);
+      return { baseUrl: parsed.baseUrl, effectiveParams: merged };
+    }
+    return { baseUrl: url, effectiveParams: params };
+  }, [url, params]);
 
   const fetchEndpoints = async (id: string) => {
     try {
@@ -115,14 +182,21 @@ const RequestPanel = ({
     }
   };
 
-  const handleSelectEndpoint = useCallback((endpoint: ApiEndpoint) => {
-    setSelectedEndpoint(endpoint);
-    setMethod(endpoint.method);
-    setUrl(endpoint.url);
-    setHeaders(endpoint.headers || []);
-    setBody(endpoint.body || '');
-    setResponse(null);
-  }, []);
+  const handleSelectEndpoint = useCallback(
+    (endpoint: ApiEndpoint) => {
+      setSelectedEndpoint(endpoint);
+      setEndpointName(endpoint.name);
+      setShowNameInput(false);
+      loadRequestConfig({
+        method: endpoint.method,
+        url: endpoint.url,
+        headers: endpoint.headers || [],
+        params: endpoint.params || [],
+        body: endpoint.body || '',
+      });
+    },
+    [loadRequestConfig]
+  );
 
   const handleAddHeader = () => {
     setHeaders([...headers, { key: '', value: '', enabled: true }]);
@@ -142,6 +216,24 @@ const RequestPanel = ({
     }
   };
 
+  const handleAddParam = () => {
+    setParams([...params, { key: '', value: '', enabled: true }]);
+  };
+
+  const handleRemoveParam = (index: number) => {
+    const newParams = [...params];
+    newParams.splice(index, 1);
+    setParams(newParams);
+  };
+
+  const handleUpdateParam = (index: number, field: 'key' | 'value' | 'enabled', value: string | boolean) => {
+    const newParams = [...params];
+    if (newParams[index]) {
+      newParams[index][field] = value as never;
+      setParams(newParams);
+    }
+  };
+
   const handleFormatBody = () => {
     setBody(tryFormatJson(body));
   };
@@ -150,6 +242,7 @@ const RequestPanel = ({
     setMethod('GET');
     setUrl('');
     setHeaders([]);
+    setParams([]);
     setBody('');
     setResponse(null);
     setSelectedEndpoint(null);
@@ -158,19 +251,28 @@ const RequestPanel = ({
   };
 
   const handleSend = async () => {
-    if (!url.trim()) {
+    // 发送前把地址栏里尚未同步的查询内容先收进参数表
+    const { baseUrl, effectiveParams } = collectParams();
+
+    if (!baseUrl.trim()) {
       message.error('请输入请求 URL');
       return;
     }
 
     try {
       setSending(true);
-      const resolvedUrl = replaceEnvVariables(url, activeEnvironment);
+      const resolvedBaseUrl = replaceEnvVariables(baseUrl, activeEnvironment);
+      const resolvedParams = effectiveParams.map((p) => ({
+        ...p,
+        value: replaceEnvVariables(p.value, activeEnvironment),
+      }));
+      const resolvedUrl = buildUrlWithParams(resolvedBaseUrl, resolvedParams);
 
       const result = await sendRequest({
         method,
         url: resolvedUrl,
         headers,
+        params: effectiveParams,
         body,
       });
 
@@ -195,12 +297,14 @@ const RequestPanel = ({
 
     try {
       setSaving(true);
+      const { baseUrl: baseUrlForSave, effectiveParams } = collectParams();
       if (selectedEndpoint) {
         await updateEndpoint(selectedEndpoint._id, {
           name: endpointName,
           method,
-          url,
+          url: baseUrlForSave,
           headers,
+          params: effectiveParams,
           body,
         });
         message.success('更新成功');
@@ -209,8 +313,9 @@ const RequestPanel = ({
           collectionId,
           name: endpointName,
           method,
-          url,
+          url: baseUrlForSave,
           headers,
+          params: effectiveParams,
           body,
         });
         message.success('保存成功');
@@ -236,6 +341,70 @@ const RequestPanel = ({
     } catch {
     }
   };
+
+  const duplicateParamKeys = getDuplicateParamKeys(params);
+  const duplicateSet = new Set(duplicateParamKeys);
+  const enabledParamCount = params.filter((p) => p.enabled && p.key.trim()).length;
+
+  const paramColumns = [
+    {
+      title: '',
+      dataIndex: 'enabled',
+      key: 'enabled',
+      width: 40,
+      render: (enabled: boolean, record: { index: number }) => (
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => handleUpdateParam(record.index, 'enabled', e.target.checked)}
+          style={{ cursor: 'pointer' }}
+        />
+      ),
+    },
+    {
+      title: '名字',
+      dataIndex: 'key',
+      key: 'key',
+      width: '35%',
+      render: (key: string, record: { index: number }) => (
+        <Input
+          placeholder="参数名"
+          value={key}
+          onChange={(e) => handleUpdateParam(record.index, 'key', e.target.value)}
+          size="small"
+          status={key.trim() && duplicateSet.has(key.trim()) ? 'error' : undefined}
+        />
+      ),
+    },
+    {
+      title: '值',
+      dataIndex: 'value',
+      key: 'value',
+      width: '50%',
+      render: (value: string, record: { index: number }) => (
+        <Input
+          placeholder="参数值"
+          value={value}
+          onChange={(e) => handleUpdateParam(record.index, 'value', e.target.value)}
+          size="small"
+        />
+      ),
+    },
+    {
+      title: '',
+      key: 'action',
+      width: 40,
+      render: (_: unknown, record: { index: number }) => (
+        <Button
+          type="text"
+          danger
+          size="small"
+          icon={<DeleteOutlined />}
+          onClick={() => handleRemoveParam(record.index)}
+        />
+      ),
+    },
+  ];
 
   const headerColumns = [
     {
@@ -343,10 +512,46 @@ const RequestPanel = ({
   const requestTabItems = [
     {
       key: 'params',
-      label: 'Params',
+      label: (
+        <Badge size="small" count={enabledParamCount} offset={[10, -2]}>
+          Params
+        </Badge>
+      ),
       children: (
         <div style={{ padding: 16 }}>
-          <Text type="secondary">Params 功能将在后续版本支持</Text>
+          {duplicateParamKeys.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              icon={<WarningOutlined />}
+              style={{ marginBottom: 8 }}
+              message={
+                <span>
+                  参数名重复：<Text strong>{duplicateParamKeys.join('、')}</Text>
+                  ；发送时只取第一次填写的值，请修改或删除多余的行。
+                </span>
+              }
+            />
+          )}
+          <Table
+            columns={paramColumns}
+            dataSource={params.map((p, i) => ({ ...p, index: i, key: i }))}
+            pagination={false}
+            size="small"
+            locale={{ emptyText: '暂无参数，点击下方按钮添加，或直接在地址栏输入 ?key=value' }}
+          />
+          <Button
+            type="dashed"
+            onClick={handleAddParam}
+            block
+            icon={<PlusOutlined />}
+            style={{ marginTop: 8 }}
+          >
+            添加参数
+          </Button>
+          <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+            只有勾选的参数会跟随请求发送；地址栏里的查询内容会自动收入此表，之后以此表为准。
+          </Text>
         </div>
       ),
     },
@@ -478,6 +683,7 @@ const RequestPanel = ({
               <Input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                onBlur={() => collectParams()}
                 placeholder="请输入请求 URL，例如 {{base_url}}/api/users"
                 style={{ flex: 1 }}
                 onPressEnter={handleSend}
@@ -540,7 +746,7 @@ const RequestPanel = ({
 
           <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <div style={{ borderBottom: '1px solid #f0f0f0' }}>
-              <Tabs defaultActiveKey="headers" items={requestTabItems} />
+              <Tabs defaultActiveKey="params" items={requestTabItems} />
             </div>
 
             {response && (

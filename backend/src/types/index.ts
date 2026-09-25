@@ -25,10 +25,17 @@ export interface HeaderItem {
   enabled: boolean;
 }
 
+export interface ParamItem {
+  key: string;
+  value: string;
+  enabled: boolean;
+}
+
 export interface ProxyRequestData {
   method: HttpMethod;
   url: string;
   headers: HeaderItem[];
+  params?: ParamItem[];
   body?: string;
 }
 
