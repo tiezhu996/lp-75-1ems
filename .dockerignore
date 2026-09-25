@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+coverage
+.git
+.gitignore
+Dockerfile*
+docker-compose*.yml
+*.log
+.env
+.env.local
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+.DS_Store
